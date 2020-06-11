@@ -10,7 +10,7 @@ module R2D2
     case protocol_version
     when 'ECv0'
       AndroidPayToken.new(token_attrs)
-    when 'ECv1'
+    when 'ECv1', 'ECv2'
       raise ArgumentError, "missing keyword: recipient_id" if recipient_id.nil?
       raise ArgumentError, "missing keyword: verification_keys" if verification_keys.nil?
 
