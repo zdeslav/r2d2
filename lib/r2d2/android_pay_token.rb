@@ -21,7 +21,7 @@ module R2D2
       # verify the tag is a valid value
       verify_mac(hkdf_keys[:mac_key], encrypted_message, tag)
 
-      JSON.parse(decrypt_message(encrypted_message, hkdf_keys[:symmetric_encryption_key]))
+      JSON.parse(decrypt_message('ECv0', encrypted_message, hkdf_keys[:symmetric_encryption_key]))
     end
   end
 end

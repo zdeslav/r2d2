@@ -2,7 +2,10 @@ module R2D2
   Error = Class.new(StandardError)
   TagVerificationError = Class.new(R2D2::Error)
   SignatureInvalidError = Class.new(R2D2::Error)
+  KeySignatureInvalidError = Class.new(R2D2::Error)
   MessageExpiredError = Class.new(R2D2::Error)
+  KeyExpiredError = Class.new(R2D2::Error)
+  KeysUnavailableError = Class.new(R2D2::Error)
 
   def build_token(token_attrs, recipient_id: nil, verification_keys: nil)
     protocol_version = token_attrs.fetch('protocolVersion', 'ECv0')
@@ -29,13 +32,20 @@ module R2D2
       private_key.dh_compute_key(point)
     end
 
-    def derive_hkdf_keys(ephemeral_public_key, shared_secret, info)
+    def derive_hkdf_keys(ephemeral_public_key, shared_secret, info, protocol = 'ECv0')
       key_material = Base64.decode64(ephemeral_public_key) + shared_secret
-      hkdf_bytes = hkdf(key_material, info)
-      {
-        symmetric_encryption_key: hkdf_bytes[0..15],
-        mac_key: hkdf_bytes[16..32]
-      }
+      hkdf_bytes = hkdf(key_material, info, protocol)
+      if protocol == 'ECv2'
+        {
+          symmetric_encryption_key: hkdf_bytes[0..31],
+          mac_key: hkdf_bytes[32..64]
+        }
+      else
+        {
+          symmetric_encryption_key: hkdf_bytes[0..15],
+          mac_key: hkdf_bytes[16..32]
+        }
+      end
     end
 
     def verify_mac(mac_key, encrypted_message, tag)
@@ -44,8 +54,14 @@ module R2D2
       raise TagVerificationError unless secure_compare(mac, Base64.decode64(tag))
     end
 
-    def decrypt_message(encrypted_data, symmetric_key)
-      decipher = OpenSSL::Cipher::AES128.new(:CTR)
+    def decrypt_message(protocol, encrypted_data, symmetric_key)
+      decipher =
+        if protocol == 'ECv2'
+          OpenSSL::Cipher::AES256.new(:CTR)
+        else
+          OpenSSL::Cipher::AES128.new(:CTR)
+        end
+
       decipher.decrypt
       decipher.key = symmetric_key
       decipher.update(Base64.decode64(encrypted_data)) + decipher.final
@@ -83,8 +99,9 @@ module R2D2
     end
 
     if defined?(OpenSSL::KDF) && OpenSSL::KDF.respond_to?(:hkdf)
-      def hkdf(key_material, info)
-        OpenSSL::KDF.hkdf(key_material, salt: 0.chr * 32, info: info, length: 32, hash: 'sha256')
+      def hkdf(key_material, info, protocol)
+        block_size = (protocol == 'ECv2') ? 64 : 32
+        OpenSSL::KDF.hkdf(key_material, salt: 0.chr * block_size, info: info, length: block_size, hash: 'sha256')
       end
     else
       begin
@@ -96,8 +113,9 @@ module R2D2
         raise
       end
 
-      def hkdf(key_material, info)
-        HKDF.new(key_material, algorithm: 'SHA256', info: info).next_bytes(32)
+      def hkdf(key_material, info, protocol)
+        block_size = (protocol == 'ECv2') ? 64 : 32
+        HKDF.new(key_material, algorithm: 'SHA256', info: info).next_bytes(block_size)
       end
     end
   end
